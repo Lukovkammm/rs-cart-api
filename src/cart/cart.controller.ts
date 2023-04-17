@@ -6,6 +6,7 @@ import { AppRequest, getUserIdFromRequest } from '../shared';
 
 import { calculateCartTotal } from './models-rules';
 import { CartService } from './services';
+import { clientPg } from './dbClient';
 
 @Controller('api/profile/cart')
 export class CartController {
@@ -17,29 +18,67 @@ export class CartController {
   // @UseGuards(JwtAuthGuard)
   // @UseGuards(BasicAuthGuard)
   @Get()
-  findUserCart(@Req() req: AppRequest) {
-    const cart = this.cartService.findOrCreateByUserId(getUserIdFromRequest(req));
+  async findUserCart(@Req() req: AppRequest) {
+    try {
+      const userId = req.query.user;
 
-    return {
-      statusCode: HttpStatus.OK,
-      message: 'OK',
-      data: { cart, total: calculateCartTotal(cart) },
+      if (!userId) {
+        const carts = await clientPg(`SELECT * FROM carts`);
+        const items = await clientPg(`SELECT * FROM cart_items`);
+        return {
+          statusCode: HttpStatus.OK,
+          message: 'OK',
+          data: { ...carts.rows[0], items: items.rows },
+        }
+      }
+
+      const cart = await clientPg(`SELECT * FROM carts WHERE user_id = '${userId}'`);
+      const id = cart.rows[0].id;
+      const items = await clientPg(`SELECT * FROM cart_items WHERE cart_id = '${id}'`);
+
+      return {
+        statusCode: HttpStatus.OK,
+        message: 'OK',
+        data: { ...cart.rows[0], items: items.rows },
+      }
+    } catch (error) {
+      console.log(error)
     }
   }
 
   // @UseGuards(JwtAuthGuard)
   // @UseGuards(BasicAuthGuard)
   @Put()
-  updateUserCart(@Req() req: AppRequest, @Body() body) { // TODO: validate body payload...
-    const cart = this.cartService.updateByUserId(getUserIdFromRequest(req), body)
+  async updateUserCart(@Req() req: AppRequest, @Body() body) { // TODO: validate body payload...
+    try {
+      const { user_id,
+        created_at,
+        updated_at,
+        status,
+        cart_id,
+        product_id,
+        count,
+        isNew } = req.body;
 
-    return {
-      statusCode: HttpStatus.OK,
-      message: 'OK',
-      data: {
-        cart,
-        total: calculateCartTotal(cart),
+      if (isNew) {
+        await clientPg(`INSERT INTO carts (user_id, created_at, updated_at, status) values ('${user_id}', '${created_at}', '${updated_at}', '${status}')`);
+        await clientPg(`INSERT INTO cart_items (cart_id, product_id, count) values ('${cart_id}', '${product_id}', '${count}')`);
+      } else {
+        await clientPg(`UPDATE carts SET status='${status}' WHERE user_id='${user_id}'`);
+        await clientPg(`UPDATE carts SET updated_at='${updated_at}' WHERE user_id='${user_id}'`);
+        await clientPg(`UPDATE cart_items SET count=${count} WHERE cart_id='${cart_id}' AND product_id='${product_id}'`);
       }
+
+      const cart = await clientPg(`SELECT * FROM carts WHERE user_id = '${user_id}'`);
+      const items = await clientPg(`SELECT * FROM cart_items WHERE cart_id = '${cart_id}'`);
+
+      return {
+        statusCode: HttpStatus.OK,
+        message: 'OK',
+        data: { ...cart.rows[0], items: items.rows },
+      }
+    } catch (error) {
+      console.log(error);
     }
   }
 
